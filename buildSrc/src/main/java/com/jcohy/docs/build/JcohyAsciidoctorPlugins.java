@@ -43,6 +43,10 @@ public class JcohyAsciidoctorPlugins implements Plugin<Project> {
             configureAsciidoctorTask(project, asciidoctorTask);
             asciidoctorTask.setGroup("documentation");
         });
+        project.getConfigurations().getByName("asciidoctorExtensions",(configuration) -> {
+            configuration.getDependencies().add(project.getDependencies()
+                    .create("org.asciidoctor:asciidoctorj-pdf:1.5.3"));
+        });
     }
 
     private void createAsciidoctorMultiPageTask(Project project) {
@@ -68,20 +72,28 @@ public class JcohyAsciidoctorPlugins implements Plugin<Project> {
     }
 
     private void configureCommonAttributes(Project project, AbstractAsciidoctorTask asciidoctorTask) {
-        Map<String, Object> attributes = new HashMap<>();
+        Map<String, Object> attributes = ProjectVersion.getAttributesMap();
+        attributes.put("spring-boot-xsd-version",getVersion());
+        Map<String, Object> docsUrlMaps = ProjectVersion.getDocsUrlMaps();
         addAsciidoctorTaskAttributes(project,attributes);
         asciidoctorTask.attributes(attributes);
+        asciidoctorTask.attributes(docsUrlMaps);
+    }
+
+    private String getVersion() {
+        String[] versionEl = ProjectVersion.SPRING_BOOT.getVersion().split("\\.");
+        return versionEl[0] + "." + versionEl[1];
     }
 
     private void addAsciidoctorTaskAttributes(Project project,Map<String, Object> attributes) {
         attributes.put("rootProject", project.getRootProject().getProjectDir());
         attributes.put("sources-root", project.getProjectDir() + "/src");
-        attributes.put("image-resource", "https://resources.jcohy.com/jcohy-docs/images/" + project.getVersion() + "/" + project.getName());
+        attributes.put("image-resource", project.getRootDir() + "/src/docs/asciidoc/images");
         attributes.put("spring-api-doc", "https://docs.spring.io/" + project.getName());
         attributes.put("doc-root","https://docs.jcohy.com");
         attributes.put("spring-docs-prefix","https://docs.spring.io/spring-framework/docs/");
         attributes.put("gh-samples-url","https://github.com/spring-projects/spring-security/master/");
-        attributes.put("docs-java", project.getRootProject().getProjectDir() + "/src/main/java/com/jcohy/sample/redis");
+        attributes.put("docs-java", project.getRootDir() + "/src/main/java/org/springframework/docs");
     }
 
     private void replaceLogo(Project project, AbstractAsciidoctorTask asciidoctorTask) {

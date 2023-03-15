@@ -1,0 +1,1113 @@
+[[webflux-client]]
+= WebClient
+
+WebClient 是一个执行 HTTP 请求的非阻塞,响应式的客户端.客户端具有功能性,流式 API,具有用于声明式组合的响应式类型,请参见 <<web-reactive.adoc#webflux-reactive-libraries>>. WebFlux 客户端和服务器依靠相同的非阻塞<<web-reactive.adoc#webflux-codecs, codecs>> 对请求和响应内容进行编码和解码.
+
+`WebClient` 需要一个 HTTP 客户端库来执行请求。 有内置支持以下内容：
+
+* https://github.com/reactor/reactor-netty[Reactor Netty]
+* https://docs.oracle.com/en/java/javase/11/docs/api/java.net.http/java/net/http/HttpClient.html[JDK HttpClient]
+* https://github.com/jetty-project/jetty-reactive-httpclient[Jetty Reactive HttpClient]
+* https://hc.apache.org/index.html[Apache HttpComponents]
+* Others can be plugged via `ClientHttpConnector`.
+
+[[webflux-client-builder]]
+== 配置
+
+创建 `WebClient` 的最简单方法之一是通过静态工厂:
+
+* `WebClient.create()`
+* `WebClient.create(String baseUrl)`
+
+上面的方法使用默认设置的 `HttpClient` 并且 `io.projectreactor.netty:reactor-netty` 位于 classpath 下
+
+您还可以将 `WebClient.builder()` 与其他选项一起使用:
+
+* `uriBuilderFactory`: 自定义 `UriBuilderFactory` ,用做基本 url
+* `defaultUriVariables`: 扩展 URI 模板时使用的默认值。
+* `defaultHeader`: 每个请求的请求头.
+* `defaultCookie`: 每个请求的 cookie
+* `defaultRequest`: `Consumer` 自定义请求.
+* `filter`: 每个请求的过滤器.
+* `exchangeStrategies`: 自定义 HTTP 消息 reader/writer.
+* `clientConnector`: HTTP客户端库设置.
+
+例如:
+
+[source,java,indent=0,subs="verbatim,quotes",role="primary"]
+.Java
+----
+	WebClient client = WebClient.builder()
+			.codecs(configurer -> ... )
+			.build();
+----
+[source,kotlin,indent=0,subs="verbatim,quotes",role="secondary"]
+.Kotlin
+----
+	val webClient = WebClient.builder()
+			.codecs { configurer -> ... }
+			.build()
+----
+
+构建后,`WebClient` 实例是不可变的. 但是,您可以克隆它并构建修改后的副本,而不会影响原始实例,如以下示例所示:
+
+[source,java,indent=0,subs="verbatim,quotes",role="primary"]
+.Java
+----
+	WebClient client1 = WebClient.builder()
+			.filter(filterA).filter(filterB).build();
+
+	WebClient client2 = client1.mutate()
+			.filter(filterC).filter(filterD).build();
+
+	// client1 has filterA, filterB
+
+	// client2 has filterA, filterB, filterC, filterD
+----
+[source,kotlin,indent=0,subs="verbatim,quotes",role="secondary"]
+.Kotlin
+----
+	val client1 = WebClient.builder()
+			.filter(filterA).filter(filterB).build()
+
+	val client2 = client1.mutate()
+			.filter(filterC).filter(filterD).build()
+
+	// client1 has filterA, filterB
+
+	// client2 has filterA, filterB, filterC, filterD
+----
+
+[[webflux-client-builder-maxinmemorysize]]
+=== MaxInMemorySize
+
+Spring WebFlux 配置了在编解码器中缓冲内存中数据的  <<web-reactive.adoc#webflux-codecs-limits,限制>> ,以避免应用程序内存问题. 默认情况下,此配置为 256KB,如果这不足以满足您的用例,您将看到以下内容:
+
+----
+org.springframework.core.io.buffer.DataBufferLimitException: Exceeded limit on max bytes to buffer
+----
+
+要更改默认编解码器的限制，请使用以下命令：:
+
+[source,java,indent=0,subs="verbatim,quotes",role="primary"]
+.Java
+----
+	WebClient webClient = WebClient.builder()
+			.codecs(configurer -> configurer.defaultCodecs().maxInMemorySize(2 * 1024 * 1024))
+			.build();
+----
+[source,kotlin,indent=0,subs="verbatim,quotes",role="secondary"]
+.Kotlin
+----
+	val webClient = WebClient.builder()
+			.codecs { configurer -> configurer.defaultCodecs().maxInMemorySize(2 * 1024 * 1024) }
+			.build()
+----
+
+[[webflux-client-builder-reactor]]
+=== Reactor Netty
+
+要自定义 Reactor Netty 设置,只需提供一个预先配置的 `HttpClient`:
+
+[source,java,indent=0,subs="verbatim,quotes",role="primary"]
+.Java
+----
+	HttpClient httpClient = HttpClient.create().secure(sslSpec -> ...);
+
+	WebClient webClient = WebClient.builder()
+			.clientConnector(new ReactorClientHttpConnector(httpClient))
+			.build();
+----
+[source,kotlin,indent=0,subs="verbatim,quotes",role="secondary"]
+.Kotlin
+----
+	val httpClient = HttpClient.create().secure { ... }
+
+	val webClient = WebClient.builder()
+		.clientConnector(ReactorClientHttpConnector(httpClient))
+		.build()
+----
+
+
+[[webflux-client-builder-reactor-resources]]
+==== Resources
+
+默认情况下,`HttpClient` 会参与 `Reactor.netty.http.HttpResources` 中包含的全局 Reactor Netty 资源,包括事件循环线程和连接池. 这是推荐的模式,因为固定的共享资源是事件循环并发的首选. 在这种模式下,全局资源将保持活动状态,直到进程退出.
+
+如果服务器为该进程计时,则通常无需显式关闭. 但是,如果服务器可以启动或停止进程内(例如,作为 WAR 部署的 Spring MVC 应用程序),则可以声明类型为 `ReactorResourceFactory` 的 Spring 托管 Bean,其中 `globalResources=true` (默认值)以确保 Reactor 关闭 Spring `ApplicationContext` 时,将关闭 Netty 全局资源,如以下示例所示:
+
+[source,java,indent=0,subs="verbatim,quotes",role="primary"]
+.Java
+----
+	@Bean
+	public ReactorResourceFactory reactorResourceFactory() {
+		return new ReactorResourceFactory();
+	}
+----
+[source,kotlin,indent=0,subs="verbatim,quotes",role="secondary"]
+.Kotlin
+----
+	@Bean
+	fun reactorResourceFactory() = ReactorResourceFactory()
+----
+
+
+您也可以选择不参与全局 Reactor Netty 资源. 但是,在这种模式下,确保所有 Reactor Netty 客户端和服务器实例使用共享资源是您的重担,如以下示例所示:
+
+[source,java,indent=0,subs="verbatim,quotes",role="primary"]
+.Java
+----
+	@Bean
+	public ReactorResourceFactory resourceFactory() {
+		ReactorResourceFactory factory = new ReactorResourceFactory();
+		factory.setUseGlobalResources(false); // <1>
+		return factory;
+	}
+
+	@Bean
+	public WebClient webClient() {
+
+		Function<HttpClient, HttpClient> mapper = client -> {
+			// Further customizations...
+		};
+
+		ClientHttpConnector connector =
+				new ReactorClientHttpConnector(resourceFactory(), mapper); // <2>
+
+		return WebClient.builder().clientConnector(connector).build(); // <3>
+	}
+----
+<1> 创建独立于全局资源的资源.
+<2> 将 `ReactorClientHttpConnector` 构造函数与资源工厂一起使用.
+<3> 将连接器插入 `WebClient.Builder`.
+
+[source,kotlin,indent=0,subs="verbatim,quotes",role="secondary"]
+.Kotlin
+----
+	@Bean
+	fun resourceFactory() = ReactorResourceFactory().apply {
+		isUseGlobalResources = false // <1>
+	}
+
+	@Bean
+	fun webClient(): WebClient {
+
+		val mapper: (HttpClient) -> HttpClient = {
+			// Further customizations...
+		}
+
+		val connector = ReactorClientHttpConnector(resourceFactory(), mapper) // <2>
+
+		return WebClient.builder().clientConnector(connector).build() // <3>
+	}
+----
+<1> 创建独立于全局资源的资源.
+<2> 将 `ReactorClientHttpConnector` 构造函数与资源工厂一起使用.
+<3> 将连接器插入 `WebClient.Builder`.
+
+
+[[webflux-client-builder-reactor-timeout]]
+==== Timeouts
+
+要配置连接超时:
+
+[source,java,indent=0,subs="verbatim,quotes",role="primary"]
+.Java
+----
+	import io.netty.channel.ChannelOption;
+
+	HttpClient httpClient = HttpClient.create()
+			.option(ChannelOption.CONNECT_TIMEOUT_MILLIS, 10000);
+
+	WebClient webClient = WebClient.builder()
+			.clientConnector(new ReactorClientHttpConnector(httpClient))
+			.build();
+----
+[source,kotlin,indent=0,subs="verbatim,quotes",role="secondary"]
+.Kotlin
+----
+	import io.netty.channel.ChannelOption
+
+	val httpClient = HttpClient.create()
+			.option(ChannelOption.CONNECT_TIMEOUT_MILLIS, 10000);
+
+	val webClient = WebClient.builder()
+			.clientConnector(ReactorClientHttpConnector(httpClient))
+			.build();
+----
+
+要配置读取和/或写入超时:
+
+[source,java,indent=0,subs="verbatim,quotes",role="primary"]
+.Java
+----
+	import io.netty.handler.timeout.ReadTimeoutHandler;
+	import io.netty.handler.timeout.WriteTimeoutHandler;
+
+	HttpClient httpClient = HttpClient.create()
+			.doOnConnected(conn -> conn
+					.addHandlerLast(new ReadTimeoutHandler(10))
+					.addHandlerLast(new WriteTimeoutHandler(10)));
+
+	// Create WebClient...
+
+----
+[source,kotlin,indent=0,subs="verbatim,quotes",role="secondary"]
+.Kotlin
+----
+	import io.netty.handler.timeout.ReadTimeoutHandler
+	import io.netty.handler.timeout.WriteTimeoutHandler
+
+	val httpClient = HttpClient.create()
+			.doOnConnected { conn -> conn
+					.addHandlerLast(ReadTimeoutHandler(10))
+					.addHandlerLast(WriteTimeoutHandler(10))
+			}
+
+	// Create WebClient...
+----
+
+为所有请求配置响应超时：
+
+[source,java,indent=0,subs="verbatim,quotes",role="primary"]
+.Java
+----
+	HttpClient httpClient = HttpClient.create()
+			.responseTimeout(Duration.ofSeconds(2));
+
+	// Create WebClient...
+----
+[source,kotlin,indent=0,subs="verbatim,quotes",role="secondary"]
+.Kotlin
+----
+	val httpClient = HttpClient.create()
+			.responseTimeout(Duration.ofSeconds(2));
+
+	// Create WebClient...
+----
+
+为特定请求配置响应超时：
+
+[source,java,indent=0,subs="verbatim,quotes",role="primary"]
+.Java
+----
+	WebClient.create().get()
+			.uri("https://example.org/path")
+			.httpRequest(httpRequest -> {
+				HttpClientRequest reactorRequest = httpRequest.getNativeRequest();
+				reactorRequest.responseTimeout(Duration.ofSeconds(2));
+			})
+			.retrieve()
+			.bodyToMono(String.class);
+----
+[source,kotlin,indent=0,subs="verbatim,quotes",role="secondary"]
+.Kotlin
+----
+	WebClient.create().get()
+			.uri("https://example.org/path")
+			.httpRequest { httpRequest: ClientHttpRequest ->
+				val reactorRequest = httpRequest.getNativeRequest<HttpClientRequest>()
+				reactorRequest.responseTimeout(Duration.ofSeconds(2))
+			}
+			.retrieve()
+			.bodyToMono(String::class.java)
+----
+
+[[webflux-client-builder-jdk-httpclient]]
+=== JDK HttpClient
+
+以下示例显示了如何自定义 JDK `HttpClient`：
+
+[source,java,indent=0,subs="verbatim,quotes",role="primary"]
+.Java
+----
+    HttpClient httpClient = HttpClient.newBuilder()
+        .followRedirects(Redirect.NORMAL)
+        .connectTimeout(Duration.ofSeconds(20))
+        .build();
+
+    ClientHttpConnector connector =
+            new JdkClientHttpConnector(httpClient, new DefaultDataBufferFactory());
+
+    WebClient webClient = WebClient.builder().clientConnector(connector).build();
+----
+
+[source,kotlin,indent=0,subs="verbatim,quotes",role="secondary"]
+.Kotlin
+----
+    val httpClient = HttpClient.newBuilder()
+        .followRedirects(Redirect.NORMAL)
+        .connectTimeout(Duration.ofSeconds(20))
+        .build()
+
+    val connector = JdkClientHttpConnector(httpClient, DefaultDataBufferFactory())
+
+    val webClient = WebClient.builder().clientConnector(connector).build()
+----
+
+[[webflux-client-builder-jetty]]
+=== Jetty
+
+以下示例显示如何自定义 Jetty `HttpClient` 设置:
+
+[source,java,indent=0,subs="verbatim,quotes",role="primary"]
+.Java
+----
+	HttpClient httpClient = new HttpClient();
+	httpClient.setCookieStore(...);
+
+	WebClient webClient = WebClient.builder()
+			.clientConnector(new JettyClientHttpConnector(httpClient))
+			.build();
+----
+[source,kotlin,indent=0,subs="verbatim,quotes",role="secondary"]
+.Kotlin
+----
+	val httpClient = HttpClient()
+	httpClient.cookieStore = ...
+
+	val webClient = WebClient.builder()
+			.clientConnector(JettyClientHttpConnector(httpClient))
+			.build();
+----
+
+默认情况下,`HttpClient` 创建自己的资源 (`Executor`, `ByteBufferPool`, `Scheduler`),这些资源将保持活动状态,直到进程退出或调用  `stop()` 为止.
+
+您可以在 Jetty 客户端(和服务器)的多个实例之间共享资源,并通过声明 `JettyResourceFactory` 类型的 Spring 托管 bean 来确保在关闭 Spring `ApplicationContext` 时关闭资源,如以下示例所示:
+
+[source,java,indent=0,subs="verbatim,quotes",role="primary"]
+.Java
+----
+	@Bean
+	public JettyResourceFactory resourceFactory() {
+		return new JettyResourceFactory();
+	}
+
+	@Bean
+	public WebClient webClient() {
+
+		HttpClient httpClient = new HttpClient();
+		// Further customizations...
+		
+		ClientHttpConnector connector =
+				new JettyClientHttpConnector(httpClient, resourceFactory()); <1>
+
+		return WebClient.builder().clientConnector(connector).build(); <2>
+	}
+----
+<1> 将 `JettyClientHttpConnector` 构造函数与资源工厂一起使用.
+<2> 将连接器插入 `WebClient.Builder`.
+
+[source,kotlin,indent=0,subs="verbatim,quotes",role="secondary"]
+.Kotlin
+----
+	@Bean
+	fun resourceFactory() = JettyResourceFactory()
+
+	@Bean
+	fun webClient(): WebClient {
+
+		val httpClient = HttpClient()
+		// Further customizations...
+			
+		val connector = JettyClientHttpConnector(httpClient, resourceFactory()) // <1>
+
+		return WebClient.builder().clientConnector(connector).build() // <2>
+	}
+----
+<1> 将 `JettyClientHttpConnector` 构造函数与资源工厂一起使用.
+<2> 将连接器插入 `WebClient.Builder`.
+
+[[webflux-client-builder-http-components]]
+=== HttpComponents
+
+以下示例显示了如何自定义 Apache HttpComponents `HttpClient` 设置：
+
+[source,java,indent=0,subs="verbatim,quotes",role="primary"]
+.Java
+----
+	HttpAsyncClientBuilder clientBuilder = HttpAsyncClients.custom();
+	clientBuilder.setDefaultRequestConfig(...);
+	CloseableHttpAsyncClient client = clientBuilder.build();
+	ClientHttpConnector connector = new HttpComponentsClientHttpConnector(client);
+
+	WebClient webClient = WebClient.builder().clientConnector(connector).build();
+----
+[source,kotlin,indent=0,subs="verbatim,quotes",role="secondary"]
+.Kotlin
+----
+	val client = HttpAsyncClients.custom().apply {
+		setDefaultRequestConfig(...)
+	}.build()
+	val connector = HttpComponentsClientHttpConnector(client)
+	val webClient = WebClient.builder().clientConnector(connector).build()
+----
+
+[[webflux-client-retrieve]]
+== `retrieve()`
+
+`retrieve()` 方法是获取响应正文并将其解码的最简单方法.以下示例显示了如何执行此操作:
+
+[source,java,indent=0,subs="verbatim,quotes",role="primary"]
+.Java
+----
+	WebClient client = WebClient.create("https://example.org");
+
+	Mono<ResponseEntity<Person>> result = client.get()
+			.uri("/persons/{id}", id).accept(MediaType.APPLICATION_JSON)
+			.retrieve()
+			.toEntity(Person.class);
+----
+[source,kotlin,indent=0,subs="verbatim,quotes",role="secondary"]
+.Kotlin
+----
+	val client = WebClient.create("https://example.org")
+
+	val result = client.get()
+			.uri("/persons/{id}", id).accept(MediaType.APPLICATION_JSON)
+			.retrieve()
+			.toEntity<Person>().awaitSingle()
+----
+
+只获取 body
+
+[source,java,indent=0,subs="verbatim,quotes",role="primary"]
+.Java
+----
+	WebClient client = WebClient.create("https://example.org");
+
+	Mono<Person> result = client.get()
+			.uri("/persons/{id}", id).accept(MediaType.APPLICATION_JSON)
+			.retrieve()
+			.bodyToMono(Person.class);
+----
+[source,kotlin,indent=0,subs="verbatim,quotes",role="secondary"]
+.Kotlin
+----
+	val client = WebClient.create("https://example.org")
+
+	val result = client.get()
+			.uri("/persons/{id}", id).accept(MediaType.APPLICATION_JSON)
+			.retrieve()
+			.awaitBody<Person>()
+----
+
+您还可以从响应中解码出一个对象流,如以下示例所示:
+
+[source,java,indent=0,subs="verbatim,quotes",role="primary"]
+.Java
+----
+	Flux<Quote> result = client.get()
+			.uri("/quotes").accept(MediaType.TEXT_EVENT_STREAM)
+			.retrieve()
+			.bodyToFlux(Quote.class);
+----
+[source,kotlin,indent=0,subs="verbatim,quotes",role="secondary"]
+.Kotlin
+----
+	val result = client.get()
+			.uri("/quotes").accept(MediaType.TEXT_EVENT_STREAM)
+			.retrieve()
+			.bodyToFlow<Quote>()
+----
+
+默认情况下,带有 4xx 或 5xx 状态代码的响应会导致 `WebClientResponseException` 或其 HTTP 状态特定的子类之一, 您还可以使用 `onStatus` 方法来自定义结果异常,如以下示例所示:
+
+[source,java,indent=0,subs="verbatim,quotes",role="primary"]
+.Java
+----
+	Mono<Person> result = client.get()
+			.uri("/persons/{id}", id).accept(MediaType.APPLICATION_JSON)
+			.retrieve()
+			.onStatus(HttpStatus::is4xxClientError, response -> ...)
+			.onStatus(HttpStatus::is5xxServerError, response -> ...)
+			.bodyToMono(Person.class);
+----
+[source,kotlin,indent=0,subs="verbatim,quotes",role="secondary"]
+.Kotlin
+----
+	val result = client.get()
+			.uri("/persons/{id}", id).accept(MediaType.APPLICATION_JSON)
+			.retrieve()
+			.onStatus(HttpStatus::is4xxClientError) { ... }
+			.onStatus(HttpStatus::is5xxServerError) { ... }
+			.awaitBody<Person>()
+----
+
+[[webflux-client-exchange]]
+== Exchange
+
+`exchangeToMono()` 和 `exchangeToFlux()` 方法（或 Kotlin 中的 `awaitExchange { }` 和 `exchangeToFlow { }`）
+方法提供了更多的控制，例如以不同的方式解码响应 ，根据响应状态:
+
+[source,java,indent=0,subs="verbatim,quotes",role="primary"]
+.Java
+----
+	Mono<Person> entityMono = client.get()
+			.uri("/persons/1")
+			.accept(MediaType.APPLICATION_JSON)
+			.exchangeToMono(response -> {
+				if (response.statusCode().equals(HttpStatus.OK)) {
+					return response.bodyToMono(Person.class);
+				}
+				else {
+					// Turn to error
+					return response.createError();
+				}
+			});
+----
+[source,kotlin,indent=0,subs="verbatim,quotes",role="secondary"]
+.Kotlin
+----
+val entity = client.get()
+  .uri("/persons/1")
+  .accept(MediaType.APPLICATION_JSON)
+  .awaitExchange {
+		if (response.statusCode() == HttpStatus.OK) {
+			 return response.awaitBody<Person>()
+		}
+		else {
+			 throw response.createExceptionAndAwait()
+		}
+  }
+----
+
+使用上述时，返回的 `Mono` 或 `Flux` 完成后，响应正文被检查，如果没有被消费，它将被释放以防止内存和连接泄漏。
+因此，响应无法在下游进一步解码。 这取决于提供的函数来声明如何在需要时解码响应。
+
+[[webflux-client-body]]
+== Request Body
+
+可以从 `ReactiveAdapterRegistry` 处理的任何异步类型对请求主体进行编码,如 `Mono` 或 Kotlin Coroutines `Deferred`,如以下示例所示:
+
+[source,java,indent=0,subs="verbatim,quotes",role="primary"]
+.Java
+----
+	Mono<Person> personMono = ... ;
+
+	Mono<Void> result = client.post()
+			.uri("/persons/{id}", id)
+			.contentType(MediaType.APPLICATION_JSON)
+			.body(personMono, Person.class)
+			.retrieve()
+			.bodyToMono(Void.class);
+----
+[source,kotlin,indent=0,subs="verbatim,quotes",role="secondary"]
+.Kotlin
+----
+	val personDeferred: Deferred<Person> = ...
+
+	client.post()
+			.uri("/persons/{id}", id)
+			.contentType(MediaType.APPLICATION_JSON)
+			.body<Person>(personDeferred)
+			.retrieve()
+			.awaitBody<Unit>()
+----
+
+您还可以对对象流进行编码,如以下示例所示:
+
+[source,java,indent=0,subs="verbatim,quotes",role="primary"]
+.Java
+----
+	Flux<Person> personFlux = ... ;
+
+	Mono<Void> result = client.post()
+			.uri("/persons/{id}", id)
+			.contentType(MediaType.APPLICATION_STREAM_JSON)
+			.body(personFlux, Person.class)
+			.retrieve()
+			.bodyToMono(Void.class);
+----
+[source,kotlin,indent=0,subs="verbatim,quotes",role="secondary"]
+.Kotlin
+----
+	val people: Flow<Person> = ...
+
+	client.post()
+			.uri("/persons/{id}", id)
+			.contentType(MediaType.APPLICATION_JSON)
+			.body(people)
+			.retrieve()
+			.awaitBody<Unit>()
+----
+
+或者,如果您具有实际值,则可以使用 `bodyValue` 快捷方式,如以下示例所示:
+
+[source,java,indent=0,subs="verbatim,quotes",role="primary"]
+.Java
+----
+	Person person = ... ;
+
+	Mono<Void> result = client.post()
+			.uri("/persons/{id}", id)
+			.contentType(MediaType.APPLICATION_JSON)
+			.bodyValue(person)
+			.retrieve()
+			.bodyToMono(Void.class);
+----
+[source,kotlin,indent=0,subs="verbatim,quotes",role="secondary"]
+.Kotlin
+----
+	val person: Person = ...
+
+	client.post()
+			.uri("/persons/{id}", id)
+			.contentType(MediaType.APPLICATION_JSON)
+			.bodyValue(person)
+			.retrieve()
+			.awaitBody<Unit>()
+----
+
+
+[[webflux-client-body-form]]
+=== Form Data
+
+要发送表单数据,可以提供  `MultiValueMap<String, String>`  作为正文. 请注意,内容由 `FormHttpMessageWriter` 自动设置为 `application/x-www-form-urlencoded` . 下面的示例演示如何使用  `MultiValueMap<String, String>`:
+
+[source,java,indent=0,subs="verbatim,quotes",role="primary"]
+.Java
+----
+	MultiValueMap<String, String> formData = ... ;
+
+	Mono<Void> result = client.post()
+			.uri("/path", id)
+			.bodyValue(formData)
+			.retrieve()
+			.bodyToMono(Void.class);
+----
+[source,kotlin,indent=0,subs="verbatim,quotes",role="secondary"]
+.Kotlin
+----
+	val formData: MultiValueMap<String, String> = ...
+
+	client.post()
+			.uri("/path", id)
+			.bodyValue(formData)
+			.retrieve()
+			.awaitBody<Unit>()
+----
+
+您还可以使用 `BodyInserters` 在线提供表单数据,如以下示例所示:
+
+[source,java,indent=0,subs="verbatim,quotes",role="primary"]
+.Java
+----
+	import static org.springframework.web.reactive.function.BodyInserters.*;
+
+	Mono<Void> result = client.post()
+			.uri("/path", id)
+			.body(fromFormData("k1", "v1").with("k2", "v2"))
+			.retrieve()
+			.bodyToMono(Void.class);
+----
+[source,kotlin,indent=0,subs="verbatim,quotes",role="secondary"]
+.Kotlin
+----
+	import org.springframework.web.reactive.function.BodyInserters.*
+
+	client.post()
+			.uri("/path", id)
+			.body(fromFormData("k1", "v1").with("k2", "v2"))
+			.retrieve()
+			.awaitBody<Unit>()
+----
+
+[[webflux-client-body-multipart]]
+=== Multipart Data
+
+要发送多部分数据,您需要提供一个 `MultiValueMap<String, ?>` 其值可以是代表部件内容的 `Object` 实例或代表部件内容和 header 的 `HttpEntity` 实例. `MultipartBodyBuilder` 提供了方便的 API 来准备多部分请求. 下面的示例演示如何创建 `MultiValueMap<String, ?>`:
+
+[source,java,indent=0,subs="verbatim,quotes",role="primary"]
+.Java
+----
+	MultipartBodyBuilder builder = new MultipartBodyBuilder();
+	builder.part("fieldPart", "fieldValue");
+	builder.part("filePart1", new FileSystemResource("...logo.png"));
+	builder.part("jsonPart", new Person("Jason"));
+	builder.part("myPart", part); // Part from a server request
+
+	MultiValueMap<String, HttpEntity<?>> parts = builder.build();
+----
+[source,kotlin,indent=0,subs="verbatim,quotes",role="secondary"]
+.Kotlin
+----
+	val builder = MultipartBodyBuilder().apply {
+		part("fieldPart", "fieldValue")
+		part("filePart1", FileSystemResource("...logo.png"))
+		part("jsonPart", Person("Jason"))
+		part("myPart", part) // Part from a server request
+	}
+
+	val parts = builder.build()
+----
+
+在大多数情况下,您不必为每个部分指定 `Content-Type`. 内容类型是根据选择用于对其进行序列化的 `HttpMessageWriter` 自动确定的,或者对于 `Resource` 而言,是基于文件扩展名的. 如有必要,您可以通过重载的构建器 `part` 方法之一显式提供 `MediaType` 以供每个部件使用.
+
+准备好  `MultiValueMap` 后，将其传递给 `WebClient` 的最简单方法是通过 `body` 方法，如下例所示：
+
+[source,java,indent=0,subs="verbatim,quotes",role="primary"]
+.Java
+----
+	MultipartBodyBuilder builder = ...;
+
+	Mono<Void> result = client.post()
+			.uri("/path", id)
+			.body(builder.build())
+			.retrieve()
+			.bodyToMono(Void.class);
+----
+[source,kotlin,indent=0,subs="verbatim,quotes",role="secondary"]
+.Kotlin
+----
+	val builder: MultipartBodyBuilder = ...
+
+	client.post()
+			.uri("/path", id)
+			.body(builder.build())
+			.retrieve()
+			.awaitBody<Unit>()
+----
+
+如果 `MultiValueMap` 包含至少一个非 `String` 值,它也可以表示常规表单数据(即 `application/x-www-form-urlencoded`),则无需将 `Content-Type` 设置为 `multipart/form-data`. 使用 `MultipartBodyBuilder` 时,总是这样,以确保 `HttpEntity` 包装器.
+
+作为 `MultipartBodyBuilder` 的替代方案,您还可以通过内置的 `BodyInserters` 提供内联样式的多部分内容,如以下示例所示:
+
+[source,java,indent=0,subs="verbatim,quotes",role="primary"]
+.Java
+----
+	import static org.springframework.web.reactive.function.BodyInserters.*;
+
+	Mono<Void> result = client.post()
+			.uri("/path", id)
+			.body(fromMultipartData("fieldPart", "value").with("filePart", resource))
+			.retrieve()
+			.bodyToMono(Void.class);
+----
+[source,kotlin,indent=0,subs="verbatim,quotes",role="secondary"]
+.Kotlin
+----
+	import org.springframework.web.reactive.function.BodyInserters.*
+
+	client.post()
+			.uri("/path", id)
+			.body(fromMultipartData("fieldPart", "value").with("filePart", resource))
+			.retrieve()
+			.awaitBody<Unit>()
+----
+
+==== `PartEvent`
+
+要按顺序流式传输多部分数据，您可以通过 `PartEvent` 对象提供多部分数据。
+
+- 可以通过 `FormPartEvent::create` 创建表单字段.
+- 可以通过 `FilePartEvent::create` 创建文件上传。.
+
+您可以使用 `Flux::concat` 连接从方法返回的流，并为 `WebClient` 创建一个请求。
+
+例如，这个 POST 请求包含表单字段和文件的多部分表单。
+
+[source,java,indent=0,subs="verbatim,quotes",role="primary"]
+.Java
+----
+Resource resource = ...
+Mono<String> result = webClient
+    .post()
+    .uri("https://example.com")
+    .body(Flux.concat(
+            FormPartEvent.create("field", "field value"),
+            FilePartEvent.create("file", resource)
+    ), PartEvent.class)
+    .retrieve()
+    .bodyToMono(String.class);
+----
+[source,kotlin,indent=0,subs="verbatim,quotes",role="secondary"]
+.Kotlin
+----
+var resource: Resource = ...
+var result: Mono<String> = webClient
+	.post()
+	.uri("https://example.com")
+	.body(
+		Flux.concat(
+			FormPartEvent.create("field", "field value"),
+			FilePartEvent.create("file", resource)
+		)
+	)
+	.retrieve()
+	.bodyToMono()
+----
+
+在服务端, 通过 `@RequestBody` 或 `ServerRequest::bodyToFlux(PartEvent.class)` 接收 `PartEvent` 对象，并且可以通过 `WebClient` 转发到另一个服务。
+
+
+[[webflux-client-filter]]
+== Client Filters
+
+您可以通过 `WebClient.Builder` 注册客户端过滤器(`ExchangeFilterFunction`),以拦截和修改请求,如以下示例所示:
+
+[source,java,indent=0,subs="verbatim,quotes",role="primary"]
+.Java
+----
+	WebClient client = WebClient.builder()
+			.filter((request, next) -> {
+
+				ClientRequest filtered = ClientRequest.from(request)
+						.header("foo", "bar")
+						.build();
+
+				return next.exchange(filtered);
+			})
+			.build();
+----
+[source,kotlin,indent=0,subs="verbatim,quotes",role="secondary"]
+.Kotlin
+----
+	val client = WebClient.builder()
+			.filter { request, next ->
+
+				val filtered = ClientRequest.from(request)
+						.header("foo", "bar")
+						.build()
+
+				next.exchange(filtered)
+			}
+			.build()
+----
+
+这可以用于跨领域的关注,例如身份验证.以下示例使用过滤器通过静态工厂方法进行基本身份验证:
+
+[source,java,indent=0,subs="verbatim,quotes",role="primary"]
+.Java
+----
+	import static org.springframework.web.reactive.function.client.ExchangeFilterFunctions.basicAuthentication;
+
+	WebClient client = WebClient.builder()
+			.filter(basicAuthentication("user", "password"))
+			.build();
+----
+[source,kotlin,indent=0,subs="verbatim,quotes",role="secondary"]
+.Kotlin
+----
+	import org.springframework.web.reactive.function.client.ExchangeFilterFunctions.basicAuthentication
+
+	val client = WebClient.builder()
+			.filter(basicAuthentication("user", "password"))
+			.build()
+----
+
+可以通过改变现有的 `WebClient` 实例来添加或删除过滤器，这不会影响新创建的 `WebClient` 实例。 例如：
+
+[source,java,indent=0,subs="verbatim,quotes",role="primary"]
+.Java
+----
+	import static org.springframework.web.reactive.function.client.ExchangeFilterFunctions.basicAuthentication;
+
+	WebClient client = webClient.mutate()
+			.filters(filterList -> {
+				filterList.add(0, basicAuthentication("user", "password"));
+			})
+			.build();
+----
+[source,kotlin,indent=0,subs="verbatim,quotes",role="secondary"]
+.Kotlin
+----
+	val client = webClient.mutate()
+			.filters { it.add(0, basicAuthentication("user", "password")) }
+			.build()
+----
+
+`WebClient` 是围绕过滤器链的外观，后跟 `ExchangeFunction`。 它提供了一个工作流程来发出请求，与更高层对象进行编码。它有助于确保始终使用响应内容。
+当过滤器以某种方式处理响应时，必须格外小心以始终消耗，它的内容或以其他方式将其传播到下游的 `WebClient`，这将确保
+相同。 下面是一个处理 `UNAUTHORIZED` 状态代码的过滤器，但可以确保发布任何响应内容，无论是否预期：
+
+[source,java,indent=0,subs="verbatim,quotes",role="primary"]
+.Java
+----
+	public ExchangeFilterFunction renewTokenFilter() {
+		return (request, next) -> next.exchange(request).flatMap(response -> {
+			if (response.statusCode().value() == HttpStatus.UNAUTHORIZED.value()) {
+				return response.releaseBody()
+						.then(renewToken())
+						.flatMap(token -> {
+							ClientRequest newRequest = ClientRequest.from(request).build();
+							return next.exchange(newRequest);
+						});
+			} else {
+				return Mono.just(response);
+			}
+		});
+	}
+----
+[source,kotlin,indent=0,subs="verbatim,quotes",role="secondary"]
+.Kotlin
+----
+	fun renewTokenFilter(): ExchangeFilterFunction? {
+		return ExchangeFilterFunction { request: ClientRequest?, next: ExchangeFunction ->
+			next.exchange(request!!).flatMap { response: ClientResponse ->
+				if (response.statusCode().value() == HttpStatus.UNAUTHORIZED.value()) {
+					return@flatMap response.releaseBody()
+							.then(renewToken())
+							.flatMap { token: String? ->
+								val newRequest = ClientRequest.from(request).build()
+								next.exchange(newRequest)
+							}
+				} else {
+					return@flatMap Mono.just(response)
+				}
+			}
+		}
+	}
+----
+
+[[webflux-client-attributes]]
+== Attributes
+
+您可以向请求添加属性。 如果您想传递信息，可以通过过滤器链并影响给定请求的过滤器行为:
+
+[source,java,indent=0,subs="verbatim,quotes",role="primary"]
+.Java
+----
+	WebClient client = WebClient.builder()
+			.filter((request, next) -> {
+				Optional<Object> usr = request.attribute("myAttribute");
+				// ...
+			})
+			.build();
+
+	client.get().uri("https://example.org/")
+			.attribute("myAttribute", "...")
+			.retrieve()
+			.bodyToMono(Void.class);
+
+		}
+----
+[source,kotlin,indent=0,subs="verbatim,quotes",role="secondary"]
+.Kotlin
+----
+	val client = WebClient.builder()
+			.filter { request, _ ->
+				val usr = request.attributes()["myAttribute"];
+				// ...
+			}
+			.build()
+
+		client.get().uri("https://example.org/")
+				.attribute("myAttribute", "...")
+				.retrieve()
+				.awaitBody<Unit>()
+----
+
+注意，你可以使用 `WebClient.Builder` 全局地配置一个  `defaultRequest` 回调，允许您将属性插入到所有请求中，
+例如，哪些可以在 Spring MVC 应用程序中使用来填充请求基于 `ThreadLocal` 数据的属性。
+
+[[webflux-client-context]]
+== Context
+
+<<webflux-client-attributes>>  提供了一种简便的方式来将信息传递给过滤器链，但它们只影响当前请求。如果你想传递信息
+传播到其他嵌套的请求，例如通过  `flatMap`，或在之后执行， 例如，通过  `concatMap`，那么你将需要使用 Reactor `Context`。
+
+Reactor `Context` 需要被填充在响应式链的末端适用于所有操作。例如:
+
+[source,java,indent=0,subs="verbatim,quotes",role="primary"]
+.Java
+----
+	WebClient client = WebClient.builder()
+			.filter((request, next) ->
+					Mono.deferContextual(contextView -> {
+						String value = contextView.get("foo");
+						// ...
+					}))
+			.build();
+
+	client.get().uri("https://example.org/")
+			.retrieve()
+			.bodyToMono(String.class)
+			.flatMap(body -> {
+					// perform nested request (context propagates automatically)...
+			})
+			.contextWrite(context -> context.put("foo", ...));
+----
+
+[[webflux-client-synchronous]]
+== Synchronous Use
+
+通过在结果末尾进行阻塞,可以以同步方式使用 `WebClient`:
+
+[source,java,indent=0,subs="verbatim,quotes",role="primary"]
+.Java
+----
+	Person person = client.get().uri("/person/{id}", i).retrieve()
+		.bodyToMono(Person.class)
+		.block();
+
+	List<Person> persons = client.get().uri("/persons").retrieve()
+		.bodyToFlux(Person.class)
+		.collectList()
+		.block();
+----
+[source,kotlin,indent=0,subs="verbatim,quotes",role="secondary"]
+.Kotlin
+----
+	val person = runBlocking {
+		client.get().uri("/person/{id}", i).retrieve()
+				.awaitBody<Person>()
+	}
+	
+	val persons = runBlocking {
+		client.get().uri("/persons").retrieve()
+				.bodyToFlow<Person>()
+				.toList()
+	}
+----
+
+但是,如果需要多个调用,则可以避免单独阻止每个响应,而等待合并的结果,这样效率更高:
+
+[source,java,indent=0,subs="verbatim,quotes",role="primary"]
+.Java
+----
+	Mono<Person> personMono = client.get().uri("/person/{id}", personId)
+			.retrieve().bodyToMono(Person.class);
+
+	Mono<List<Hobby>> hobbiesMono = client.get().uri("/person/{id}/hobbies", personId)
+			.retrieve().bodyToFlux(Hobby.class).collectList();
+
+	Map<String, Object> data = Mono.zip(personMono, hobbiesMono, (person, hobbies) -> {
+				Map<String, String> map = new LinkedHashMap<>();
+				map.put("person", person);
+				map.put("hobbies", hobbies);
+				return map;
+			})
+			.block();
+----
+[source,kotlin,indent=0,subs="verbatim,quotes",role="secondary"]
+.Kotlin
+----
+	val data = runBlocking {
+			val personDeferred = async {
+				client.get().uri("/person/{id}", personId)
+						.retrieve().awaitBody<Person>()
+			}
+
+			val hobbiesDeferred = async {
+				client.get().uri("/person/{id}/hobbies", personId)
+						.retrieve().bodyToFlow<Hobby>().toList()
+			}
+
+			mapOf("person" to personDeferred.await(), "hobbies" to hobbiesDeferred.await())
+		}
+----
+
+以上仅是一个示例.还有许多其他模式和运算符可用于构建响应式管道,该响应式管道可进行许多远程调用(可能是嵌套的,相互依赖的),而不会阻塞到最后.
+
+
+[NOTE]
+====
+使用 `Flux` 或 `Mono`,您永远不必阻塞 Spring MVC 或 Spring WebFlux 控制器. 只需从 controller 方法返回结果类型即可. 相同的原则适用于 Kotlin Coroutines 和 Spring WebFlux,只需在控制器方法中使用暂停功能或返回 `Flow` 即可.
+====
+
+[[webflux-client-testing]]
+== Testing
+
+若要测试使用 `WebClient` 的代码,可以使用模拟 Web 服务器,例如 https://github.com/square/okhttp#mockwebserver[OkHttp MockWebServer]. 要查看其用法示例,请查看 Spring Framework 测试套件中的 {spring-framework-main-code}/spring-webflux/src/test/java/org/springframework/web/reactive/function/client/WebClientIntegrationTests.java[`WebClientIntegrationTests`] 或
+OkHttp 存储库中的 https://github.com/square/okhttp/tree/master/samples/static-server[`static-server`]示例.

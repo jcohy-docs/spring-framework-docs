@@ -1,0 +1,76 @@
+[[appendix]]
+= Appendix
+:toc: left
+:toclevels: 4
+:tabsize: 4
+:docinfo1:
+include::attributes.adoc[]
+
+本一部分涵盖了核心 Spring 框架核心中的多个模块的主题.
+
+
+[[appendix-spring-properties]]
+== Spring 属性
+
+{api-spring-framework}/core/SpringProperties.html[`SpringProperties`] 是控制 Spring 框架某些低层面的属性的静态容器。用户可以通过 JVM 系统属性或通过 `SpringProperties` 以编程方式配置这些属性 例如: `SpringProperties.setProperty(String key, String value)` 方法。如果部署环境不允许自定义 JVM 系统属性，则可能需要使用后者。作为一种替代方法，这些属性可以在 spring 中配置。属性文件在类路径的根目录中—例如，部署在应用程序的 JAR 文件中.
+
+下表列出了所有当前支持的 Spring 属性。
+
+.Supported Spring Properties
+|===
+| Name | Description
+
+| `spring.beaninfo.ignore`
+| Instructs Spring to use the `Introspector.IGNORE_ALL_BEANINFO` mode when calling the
+JavaBeans `Introspector`. See
+{api-spring-framework}++/beans/CachedIntrospectionResults.html#IGNORE_BEANINFO_PROPERTY_NAME++[`CachedIntrospectionResults`]
+for details.
+
+| `spring.expression.compiler.mode`
+| The mode to use when compiling expressions for the
+<<core.adoc#expressions-compiler-configuration, Spring Expression Language>>.
+
+| `spring.getenv.ignore`
+| Instructs Spring to ignore operating system environment variables if a Spring
+`Environment` property -- for example, a placeholder in a configuration String -- isn't
+resolvable otherwise. See
+{api-spring-framework}++/core/env/AbstractEnvironment.html#IGNORE_GETENV_PROPERTY_NAME++[`AbstractEnvironment`]
+for details.
+
+| `spring.index.ignore`
+| Instructs Spring to ignore the components index located in
+`META-INF/spring.components`. See <<core.adoc#beans-scanning-index, Generating an Index
+of Candidate Components>>.
+
+| `spring.jdbc.getParameterType.ignore`
+| Instructs Spring to ignore `java.sql.ParameterMetaData.getParameterType` completely.
+See the note in <<data-access.adoc#jdbc-batch-list, Batch Operations with a List of Objects>>.
+
+| `spring.jndi.ignore`
+| Instructs Spring to ignore a default JNDI environment, as an optimization for scenarios
+where nothing is ever to be found for such JNDI fallback searches to begin with, avoiding
+the repeated JNDI lookup overhead. See
+{api-spring-framework}++/jndi/JndiLocatorDelegate.html#IGNORE_JNDI_PROPERTY_NAME++[`JndiLocatorDelegate`]
+for details.
+
+| `spring.objenesis.ignore`
+| Instructs Spring to ignore Objenesis, not even attempting to use it. See
+{api-spring-framework}++/objenesis/SpringObjenesis.html#IGNORE_OBJENESIS_PROPERTY_NAME++[`SpringObjenesis`]
+for details.
+
+| `spring.test.constructor.autowire.mode`
+| The default _test constructor autowire mode_ to use if `@TestConstructor` is not present
+on a test class. See <<testing.adoc#integration-testing-annotations-testconstructor,
+Changing the default test constructor autowire mode>>.
+
+| `spring.test.context.cache.maxSize`
+| The maximum size of the context cache in the _Spring TestContext Framework_. See
+<<testing.adoc#testcontext-ctx-management-caching, Context Caching>>.
+
+| `spring.test.enclosing.configuration`
+| The default _enclosing configuration inheritance mode_ to use if
+`@NestedTestConfiguration` is not present on a test class. See
+<<testing.adoc#integration-testing-annotations-nestedtestconfiguration, Changing the
+default enclosing configuration inheritance mode>>.
+
+|===

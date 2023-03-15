@@ -66,7 +66,7 @@ public class ArchivesPlugins implements Plugin<Project> {
         project.getTasks().create("aggregatedAsciidoctor", Copy.class,(sync) -> {
             sync.setDestinationDir(new File(project.getBuildDir().getPath() + "/reference"));
             project.afterEvaluate((p) -> {
-                project.subprojects((sub) -> {
+                project.allprojects((sub) -> {
                     sync.dependsOn(sub.getTasks().withType(AbstractAsciidoctorTask.class));
                     sync.from(sub.getBuildDir() + "/docs/asciidocMultipage",(spec) -> {
                         spec.into(sub.getName() + "/" + sub.getVersion() + "/html5");

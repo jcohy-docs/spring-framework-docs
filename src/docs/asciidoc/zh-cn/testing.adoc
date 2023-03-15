@@ -1,0 +1,24 @@
+[[testing]]
+= 测试
+include::attributes.adoc[]
+
+本章介绍了 Spring 对集成测试以及单元测试的最佳实践.  Spring 团队提倡测试驱动开发 (TDD) .  Spring 团队发现正确使用控制反转 (IoC) 确实使单元测试和集成测试更加容易 (因为在类上存在 setter 方法和适当的构造函数,使得它们在测试中更容易连接在一起,而不必设置服务注册等类似结构) .
+
+
+include::testing/testing-introduction.adoc[leveloffset=+1]
+
+include::testing/unit-testing.adoc[leveloffset=+1]
+
+include::testing/integration-testing.adoc[leveloffset=+1]
+
+include::testing/testing-support-jdbc.adoc[leveloffset=+1]
+
+include::testing/testcontext-framework.adoc[leveloffset=+1]
+
+include::testing/testing-webtestclient.adoc[leveloffset=+1]
+
+include::testing/spring-mvc-test-framework.adoc[leveloffset=+1]
+
+include::testing/spring-mvc-test-client.adoc[leveloffset=+1]
+
+include::testing/testing-appendix.adoc[leveloffset=+1]
